@@ -1,5 +1,6 @@
 """Tkinter desktop interface for the Beam Designer."""
 
+import csv
 import json
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -34,6 +35,7 @@ class BeamDesignerApp(tk.Tk):
 
         self.support = "simple"
         self.point_rows: list[dict[str, tk.Widget]] = []
+        self._latest_export_rows: list[tuple[float, float, float, float]] = []
         self.build_ui()
         self.add_point_load()
         self.remove_point_row(self.point_rows[0])
@@ -167,6 +169,9 @@ class BeamDesignerApp(tk.Tk):
         tk.Button(controls, text="Update analysis", bg="#087e83", fg="white", relief="flat",
                   activebackground="#075f65", font=("Segoe UI", 10, "bold"),
                   command=self.analyze).pack(fill="x", padx=16, pady=14, ipady=7)
+        tk.Button(controls, text="Export beam table (CSV)", bg="#ffffff", fg="#087e83", relief="solid",
+                  borderwidth=1, activebackground="#eaf5f3", font=("Segoe UI", 9, "bold"),
+                  command=self.export_csv).pack(fill="x", padx=16, pady=(0, 14), ipady=6)
         self.form_error = tk.Label(controls, text="", bg="#fff2f0", fg="#9c3935",
                                    font=("Segoe UI", 9), wraplength=300, justify="left")
 
@@ -510,6 +515,11 @@ class BeamDesignerApp(tk.Tk):
                          moment_at(span, total_case, self.support, x, total_statics)) for x in coordinates]
         live_deflection = integrate_deflection(span, live_case, properties, self.support, live_coordinates)
         total_deflection = integrate_deflection(span, total_case, properties, self.support, coordinates)
+        deflection_by_x = {round(x_ft, 9): deflection for x_ft, deflection in total_deflection}
+        self._latest_export_rows = [
+            (x_ft, shear, moment, deflection_by_x.get(round(x_ft, 9), 0.0))
+            for x_ft, shear, moment in total_points
+        ]
 
         max_shear_index = max(range(len(total_points)), key=lambda i: abs(total_points[i][1]))
         max_moment_index = max(range(len(total_points)), key=lambda i: abs(total_points[i][2]))
@@ -538,6 +548,40 @@ class BeamDesignerApp(tk.Tk):
     def show_error(self, message):
         self.form_error.configure(text=message)
         self.form_error.pack(fill="x", padx=16, pady=(0, 10))
+
+    def export_csv(self):
+        if not self._latest_export_rows:
+            messagebox.showerror(
+                "Export unavailable",
+                "Run a valid analysis before exporting the beam table.",
+                parent=self,
+            )
+            return
+
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Export beam table",
+            defaultextension=".csv",
+            filetypes=[("Excel CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "w", encoding="utf-8-sig", newline="") as csv_file:
+                writer = csv.writer(csv_file)
+                writer.writerow(["x (ft)", "V (kip)", "M (kip-ft)", "Deflection (in)"])
+                for x_ft, shear, moment, deflection in self._latest_export_rows:
+                    writer.writerow([
+                        f"{x_ft:.6f}",
+                        f"{shear:.9f}",
+                        f"{moment:.9f}",
+                        f"{deflection:.9f}",
+                    ])
+        except OSError as error:
+            messagebox.showerror("Export failed", str(error), parent=self)
+            return
+        messagebox.showinfo("Beam table exported", f"Exported CSV to:\n{path}", parent=self)
 
     def draw_beam(self, span, load_case, statics):
         canvas = self.beam_canvas

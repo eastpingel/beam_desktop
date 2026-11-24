@@ -1,4 +1,10 @@
 import unittest
+import tempfile
+import os
+import csv
+
+import app
+from tkinter import filedialog, messagebox
 
 from beam_core import (
     LoadCase,
@@ -29,6 +35,24 @@ class BeamCoreTests(unittest.TestCase):
         )
         maximum = max_abs([value for _, value in deflections])[1]
         self.assertAlmostEqual(abs(maximum), 0.609, places=2)
+
+    def test_csv_export(self):
+        root = app.BeamDesignerApp()
+        root.withdraw()
+        root.update()
+        root._latest_export_rows = [(0.0, 10.0, 0.0, 0.0), (10.0, 0.0, 50.0, -0.608515)]
+        handle, path = tempfile.mkstemp(suffix=".csv")
+        os.close(handle)
+        filedialog.asksaveasfilename = lambda **kwargs: path
+        messagebox.showinfo = lambda *args, **kwargs: None
+        root.export_csv()
+        with open(path, "r", encoding="utf-8-sig", newline="") as csv_file:
+            rows = list(csv.reader(csv_file))
+        root.destroy()
+        os.remove(path)
+        self.assertEqual(rows[0], ["x (ft)", "V (kip)", "M (kip-ft)", "Deflection (in)"])
+        self.assertEqual(rows[1][0], "0.000000")
+        self.assertEqual(rows[2][2], "50.000000000")
 
 
 if __name__ == "__main__":

@@ -22,6 +22,9 @@ Show shear, moment, and deflection diagrams for a beam and provide preliminary s
 - Provide a File menu with Save and Open commands.
 - Save beam files in JSON format containing the support type, span, selected section and section properties, deflection limit, uniform loads, point loads, material/product, property source, and self-weight setting.
 - Open restores the saved beam model and immediately reruns the analysis.
+- Provide a button that exports a table of along-beam analysis values to a CSV file.
+- The CSV table contains columns for position x (ft), shear V (kip), bending moment M (kip-ft), and total-load deflection (in).
+- Exported CSV files must use spreadsheet-compatible comma separators and an Excel-readable encoding.
 
 ## First-version beam list
 
