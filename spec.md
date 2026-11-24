@@ -25,6 +25,10 @@ Show shear, moment, and deflection diagrams for a beam and provide preliminary s
 - Provide a button that exports a table of along-beam analysis values to a CSV file.
 - The CSV table contains columns for position x (ft), shear V (kip), bending moment M (kip-ft), and total-load deflection (in).
 - Exported CSV files must use spreadsheet-compatible comma separators and an Excel-readable encoding.
+- Provide a button that saves a hand-in-ready PDF design report.
+- The PDF report lists all current beam and load inputs at the top.
+- The PDF includes beam/loading, shear, moment, and deflection diagrams, plus the screening-check results and assumptions.
+- The report clearly identifies unimplemented limit states and remains a preliminary screening document.
 
 ## First-version beam list
 

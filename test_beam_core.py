@@ -54,6 +54,54 @@ class BeamCoreTests(unittest.TestCase):
         self.assertEqual(rows[1][0], "0.000000")
         self.assertEqual(rows[2][2], "50.000000000")
 
+    def test_pdf_export(self):
+        root = app.BeamDesignerApp()
+        root.withdraw()
+        root.update()
+        root._latest_report = {
+            "support": "Simply supported",
+            "span": 20.0,
+            "section": "W12x26",
+            "material": "ASTM A992",
+            "live_uniform": 1.0,
+            "other_uniform": 0.0,
+            "point_loads": [],
+            "include_self_weight": False,
+            "elastic_modulus": 29000.0,
+            "inertia": 204.0,
+            "section_modulus": 33.4,
+            "self_weight": 26.0,
+            "property_source": "AISC Shapes Database v16.0",
+            "deflection_limit": 0.667,
+            "left_reaction": 10.0,
+            "right_reaction": 10.0,
+            "max_shear": 10.0,
+            "max_moment": 50.0,
+            "max_deflection": 0.608515,
+            "checks": [{
+                "name": "Deflection",
+                "status": "Pass",
+                "value": 0.608515,
+                "limit": 0.667,
+                "unit": "in",
+                "detail": "Entered limit",
+            }],
+            "beam_loading": [(0.0, 10.0, 0.0), (10.0, 0.0, 50.0), (20.0, -10.0, 0.0)],
+            "deflection": [(0.0, 0.0), (10.0, -0.608515), (20.0, 0.0)],
+        }
+        handle, path = tempfile.mkstemp(suffix=".pdf")
+        os.close(handle)
+        filedialog.asksaveasfilename = lambda **kwargs: path
+        messagebox.showinfo = lambda *args, **kwargs: None
+        root.export_pdf()
+        with open(path, "rb") as pdf_file:
+            pdf = pdf_file.read()
+        root.destroy()
+        os.remove(path)
+        self.assertTrue(pdf.startswith(b"%PDF-1.4"))
+        self.assertIn(b"/Count 2", pdf)
+        self.assertIn(b"Beam Studio", pdf)
+
 
 if __name__ == "__main__":
     unittest.main()

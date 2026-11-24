@@ -2,6 +2,7 @@
 
 import csv
 import json
+import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -36,6 +37,7 @@ class BeamDesignerApp(tk.Tk):
         self.support = "simple"
         self.point_rows: list[dict[str, tk.Widget]] = []
         self._latest_export_rows: list[tuple[float, float, float, float]] = []
+        self._latest_report: dict | None = None
         self.build_ui()
         self.add_point_load()
         self.remove_point_row(self.point_rows[0])
@@ -172,6 +174,9 @@ class BeamDesignerApp(tk.Tk):
         tk.Button(controls, text="Export beam table (CSV)", bg="#ffffff", fg="#087e83", relief="solid",
                   borderwidth=1, activebackground="#eaf5f3", font=("Segoe UI", 9, "bold"),
                   command=self.export_csv).pack(fill="x", padx=16, pady=(0, 14), ipady=6)
+        tk.Button(controls, text="Save design report (PDF)", bg="#087e83", fg="white", relief="flat",
+                  borderwidth=0, activebackground="#075f65", font=("Segoe UI", 9, "bold"),
+                  command=self.export_pdf).pack(fill="x", padx=16, pady=(0, 14), ipady=7)
         self.form_error = tk.Label(controls, text="", bg="#fff2f0", fg="#9c3935",
                                    font=("Segoe UI", 9), wraplength=300, justify="left")
 
@@ -544,6 +549,38 @@ class BeamDesignerApp(tk.Tk):
         self.draw_chart("Bending moment", [(x, moment) for x, _, moment in total_points], "kip-ft")
         self.draw_chart("Deflection", total_deflection, "in", deflection_limit)
         self.draw_checks(span, deflection_limit, total_points, total_deflection, live_deflection, properties)
+        point_load_data = [
+            (point.magnitude, point.position, point.kind)
+            for point in point_loads
+        ]
+        check_data = self.get_check_report(
+            span, deflection_limit, total_points, total_deflection,
+            live_deflection, properties,
+        )
+        self._latest_report = {
+            "support": "Simply supported" if self.support == "simple" else "Cantilever",
+            "span": span,
+            "section": self.beam.get(),
+            "material": self.material.get(),
+            "live_uniform": live_uniform,
+            "other_uniform": other_uniform,
+            "point_loads": point_load_data,
+            "include_self_weight": self.self_weight.get(),
+            "elastic_modulus": properties.elastic_modulus,
+            "inertia": properties.inertia,
+            "section_modulus": properties.section_modulus,
+            "self_weight": properties.weight,
+            "property_source": self.property_source.get(),
+            "deflection_limit": deflection_limit,
+            "left_reaction": total_statics.left_reaction,
+            "right_reaction": total_statics.right_reaction,
+            "max_shear": abs(peak_shear[1]),
+            "max_moment": abs(peak_moment[2]),
+            "max_deflection": abs(peak_deflection[1]),
+            "checks": check_data,
+            "beam_loading": total_points,
+            "deflection": total_deflection,
+        }
 
     def show_error(self, message):
         self.form_error.configure(text=message)
@@ -582,6 +619,270 @@ class BeamDesignerApp(tk.Tk):
             messagebox.showerror("Export failed", str(error), parent=self)
             return
         messagebox.showinfo("Beam table exported", f"Exported CSV to:\n{path}", parent=self)
+
+    def get_check_report(self, span, deflection_limit, total_points,
+                         total_deflection, live_deflection, properties):
+        max_shear = max(abs(point[1]) for point in total_points)
+        max_moment = max(abs(point[2]) for point in total_points)
+        max_deflection = max((abs(value) for _, value in total_deflection), default=0)
+        max_live_deflection = max((abs(value) for _, value in live_deflection), default=0)
+        bending_stress = (
+            max_moment * 12 / properties.section_modulus
+            if properties.section_modulus > 0 else 0
+        )
+        try:
+            bending_limit = float(self.allow_bending.get())
+        except ValueError:
+            bending_limit = 0
+        try:
+            shear_limit = float(self.allow_shear.get())
+        except ValueError:
+            shear_limit = 0
+        try:
+            bearing_limit = float(self.allow_bearing.get())
+        except ValueError:
+            bearing_limit = 0
+        max_bearing = abs(solve_statics(
+            span,
+            make_load_case(
+                self.entry_float(self.live_uniform),
+                self.entry_float(self.other_uniform),
+                self.read_point_loads(),
+                "total",
+                self.self_weight.get(),
+                properties.weight,
+            ),
+            self.support,
+        ).left_reaction)
+        checks = [
+            ("Bending stress", bending_stress, bending_limit, "ksi",
+             "fb = M/Sx"),
+            ("Total-load deflection", max_deflection, deflection_limit, "in",
+             "Entered limit"),
+            ("Live-load deflection", max_live_deflection, deflection_limit, "in",
+             "Entered limit"),
+            ("Shear strength", max_shear, shear_limit, "kip",
+             "Entered capacity"),
+            ("Support bearing", max_bearing, bearing_limit, "kip/support",
+             "Maximum reaction"),
+        ]
+        result = []
+        for name, value, limit_value, unit, detail in checks:
+            status = "Not checked"
+            if name in ("Bending stress", "Shear strength", "Support bearing") and limit_value > 0:
+                status = "Pass" if value <= limit_value else "Fail"
+            elif name in ("Total-load deflection", "Live-load deflection"):
+                status = "Pass" if value <= limit_value else "Fail"
+            result.append({
+                "name": name,
+                "value": value,
+                "limit": limit_value,
+                "unit": unit,
+                "detail": detail,
+                "status": status,
+            })
+        return result
+
+    @staticmethod
+    def pdf_escape(value):
+        return str(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    def export_pdf(self):
+        if not self._latest_report:
+            messagebox.showerror(
+                "Export unavailable",
+                "Run a valid analysis before exporting the PDF report.",
+                parent=self,
+            )
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Save design report",
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        report = self._latest_report
+        commands = []
+
+        def text(x, y, size, value):
+            commands.append(
+                f"BT /F1 {size} Tf {x:.1f} {y:.1f} Td "
+                f"({self.pdf_escape(value)}) Tj ET"
+            )
+
+        def line(x1, y1, x2, y2, width=1):
+            commands.append(
+                f"{width:.1f} w {x1:.1f} {y1:.1f} m "
+                f"{x2:.1f} {y2:.1f} l S"
+            )
+
+        text(36, 752, 18, "Beam Studio - Design Screening Report")
+        text(36, 732, 9, f"Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        text(36, 704, 12, "Inputs")
+        y = 684
+        input_lines = [
+            f"Support: {report['support']}",
+            f"Span: {report['span']:.2f} ft",
+            f"Section: {report['section']} | Material: {report['material'] or 'Not specified'}",
+            f"Live uniform: {report['live_uniform']:.3f} kip/ft",
+            f"Other uniform: {report['other_uniform']:.3f} kip/ft",
+            f"Self-weight included: {'Yes' if report['include_self_weight'] else 'No'} "
+            f"({report['self_weight']:.2f} lb/ft)",
+            f"E: {report['elastic_modulus']:.2f} ksi | "
+            f"Ix: {report['inertia']:.2f} in4 | "
+            f"Sx: {report['section_modulus']:.2f} in3",
+            f"Deflection limit: {report['deflection_limit']:.3f} in",
+            f"Property source: {report['property_source'] or 'Not specified'}",
+        ]
+        if report["point_loads"]:
+            input_lines.append(
+                "Point loads: "
+                + "; ".join(
+                    f"{magnitude:.3f} kip at {position:.2f} ft ({kind})"
+                    for magnitude, position, kind in report["point_loads"]
+                )
+            )
+        else:
+            input_lines.append("Point loads: None")
+        for input_line in input_lines:
+            text(36, y, 8, input_line)
+            y -= 16
+
+        def draw_plot(title, unit, values, x_min, y_top, x_max, y_bottom, limit=None):
+            text(x_min, y_top + 18, 10, title)
+            line(x_min, y_bottom, x_max, y_bottom)
+            line(x_min, y_bottom, x_min, y_top)
+            if not values:
+                return
+            xs = [point[0] for point in values]
+            ys = [point[1] for point in values]
+            span = max(report["span"], 0.0001)
+            max_abs = max([abs(value) for value in ys] or [0.0001])
+            previous = None
+            for x_ft, value in values:
+                px = x_min + (x_max - x_min) * x_ft / span
+                py = (y_top + y_bottom) / 2 - (y_bottom - y_top) / 2 * value / (max_abs * 1.1)
+                if previous:
+                    line(previous[0], previous[1], px, py)
+                previous = (px, py)
+            if limit is not None:
+                py = (y_top + y_bottom) / 2 - (y_bottom - y_top) / 2 * limit / (max_abs * 1.1)
+                line(x_min, py, x_max, py)
+                text(x_max - 100, py + 4, 7, f"Limit {limit:.3f} {unit}")
+            text(x_min, y_bottom - 12, 7, f"0 ft")
+            text(x_max - 25, y_bottom - 12, 7, f"{span:.1f} ft")
+
+        beam_loading = [
+            (x_ft, shear)
+            for x_ft, shear, _ in report["beam_loading"]
+        ]
+        moment_loading = [
+            (x_ft, moment)
+            for x_ft, _, moment in report["beam_loading"]
+        ]
+        deflection_loading = report["deflection"]
+
+        draw_plot("Shear force (kip)", "kip", beam_loading, 36, 470, 576, 390)
+        draw_plot("Bending moment (kip-ft)", "kip-ft", moment_loading, 36, 340, 576, 260)
+        draw_plot(
+            "Deflection (in)",
+            "in",
+            deflection_loading,
+            36,
+            210,
+            576,
+            130,
+            report["deflection_limit"],
+        )
+        text(36, 102, 8,
+             f"Reactions: left {report['left_reaction']:.2f} kip")
+        text(36, 88, 8,
+             f"Maximum shear: {report['max_shear']:.2f} kip | "
+             f"Maximum moment: {report['max_moment']:.2f} kip-ft | "
+             f"Maximum deflection: {report['max_deflection']:.3f} in")
+
+        page1_commands = commands
+
+        check_commands = []
+        def check_text(x, y, size, value):
+            check_commands.append(
+                f"BT /F1 {size} Tf {x:.1f} {y:.1f} Td "
+                f"({self.pdf_escape(value)}) Tj ET"
+            )
+        check_text(36, 752, 18, "Beam Studio - Screening Checks")
+        check_text(36, 728, 9, f"Section: {report['section']} | Span: {report['span']:.2f} ft")
+        y = 694
+        for check in report["checks"]:
+            limit_text = (
+                f" | Limit: {check['limit']:.3f} {check['unit']}"
+                if check["limit"] > 0 else " | Limit: Not entered"
+            )
+            check_text(
+                36,
+                y,
+                10,
+                f"{check['name']}: {check['status']} - "
+                f"{check['value']:.3f} {check['unit']}{limit_text}",
+            )
+            check_text(36, y - 13, 8, f"Basis: {check['detail']}")
+            y -= 42
+        check_text(36, 430, 9, "Not evaluated")
+        check_text(
+            36,
+            414,
+            8,
+            "Buckling, connections, load combinations, and every applicable unimplemented limit state.",
+        )
+        check_text(
+            36,
+            392,
+            8,
+            "Preliminary screening only. Verify member properties and assumptions with a qualified structural professional.",
+        )
+
+        self.write_pdf(path, page1_commands, check_commands)
+        messagebox.showinfo("PDF report saved", f"Saved design report to:\n{path}", parent=self)
+
+    def write_pdf(self, path, page1_commands, page2_commands):
+        stream1 = "\n".join(page1_commands).encode("latin-1", "replace")
+        stream2 = "\n".join(page2_commands).encode("latin-1", "replace")
+
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+            b"<< /Length " + str(len(stream1)).encode("ascii") + b" >>\nstream\n"
+            + stream1 + b"\nendstream",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>",
+            b"<< /Length " + str(len(stream2)).encode("ascii") + b" >>\nstream\n"
+            + stream2 + b"\nendstream",
+        ]
+
+        pdf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+        offsets = [0]
+        for object_number, body in enumerate(objects, start=1):
+            offsets.append(len(pdf))
+            pdf.extend(f"{object_number} 0 obj\n".encode("ascii"))
+            pdf.extend(body)
+            pdf.extend(b"\nendobj\n")
+
+        xref_offset = len(pdf)
+        pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+        pdf.extend(b"0000000000 65535 f \n")
+        for offset in offsets[1:]:
+            pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+        pdf.extend(
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii")
+        )
+        with open(path, "wb") as pdf_file:
+            pdf_file.write(pdf)
 
     def draw_beam(self, span, load_case, statics):
         canvas = self.beam_canvas
