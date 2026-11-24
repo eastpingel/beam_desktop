@@ -30,8 +30,8 @@ class BeamDesignerApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Beam Studio - Beam Analysis")
-        self.geometry("1280x820")
-        self.minsize(980, 650)
+        self.geometry("1440x900")
+        self.minsize(960, 650)
         self.configure(bg="#f3f6f7")
 
         self.support = "simple"
@@ -72,33 +72,39 @@ class BeamDesignerApp(tk.Tk):
         self.configure(menu=menu)
 
         heading = tk.Frame(self, bg="#f3f6f7")
-        heading.pack(fill="x", padx=36, pady=(24, 12))
+        heading.pack(fill="x", padx=24, pady=(12, 6))
         tk.Label(heading, text="BEAM DESIGNER", fg="#087e83", bg="#f3f6f7",
                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
         tk.Label(heading, text="Beam designer", bg="#f3f6f7", fg="#172a35",
-                 font=("Segoe UI", 28, "bold")).pack(anchor="w")
+                 font=("Segoe UI", 22, "bold")).pack(anchor="w")
 
         banner = tk.Frame(self, bg="#eaf5f3", highlightthickness=1, highlightbackground="#d1e8e4")
-        banner.pack(fill="x", padx=36, pady=(0, 16))
+        banner.pack(fill="x", padx=24, pady=(0, 8))
         tk.Label(banner, text="Example loaded. 20 ft simply supported W12x26 - 1 kip/ft full-span live load - self-weight excluded.",
-                 bg="#eaf5f3", fg="#34585c", font=("Segoe UI", 10), padx=14, pady=9).pack(anchor="w")
+                 bg="#eaf5f3", fg="#34585c", font=("Segoe UI", 9), padx=12, pady=6).pack(anchor="w")
 
         workspace = ttk.Frame(self)
-        workspace.pack(fill="both", expand=True, padx=36, pady=(0, 24))
+        workspace.pack(fill="both", expand=True, padx=24, pady=(0, 12))
         workspace.columnconfigure(1, weight=1)
         workspace.rowconfigure(0, weight=1)
 
         left = tk.Frame(workspace, bg="#ffffff", highlightthickness=1, highlightbackground="#dce4e8")
+        left.configure(width=360)
+        left.grid_propagate(False)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
 
         left_scroll = tk.Canvas(left, bg="#ffffff", highlightthickness=0)
         left_scroll.pack(side="left", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(left, orient="vertical", command=left_scroll.yview)
         scrollbar.pack(side="right", fill="y")
-        left_scroll.configure(yscrollcommand=scrollbar.set)
+        horizontal_scrollbar = ttk.Scrollbar(left, orient="horizontal", command=left_scroll.xview)
+        horizontal_scrollbar.pack(side="bottom", fill="x")
+        left_scroll.configure(yscrollcommand=scrollbar.set, xscrollcommand=horizontal_scrollbar.set)
         controls = tk.Frame(left_scroll, bg="#ffffff")
-        left_scroll.create_window((0, 0), window=controls, anchor="nw")
+        left_scroll.create_window((0, 0), window=controls, anchor="nw", width=360)
         controls.bind("<Configure>", lambda event: left_scroll.configure(scrollregion=left_scroll.bbox("all")))
+        left_scroll.bind("<MouseWheel>", lambda event: left_scroll.yview_scroll(int(-1 * (event.delta / 120)), "units"))
+        left_scroll.bind("<Shift-MouseWheel>", lambda event: left_scroll.xview_scroll(int(-1 * (event.delta / 120)), "units"))
 
         tk.Label(controls, text="Analysis inputs", bg="#ffffff", fg="#172a35",
                  font=("Segoe UI", 13, "bold"), padx=16, pady=14).pack(fill="x")
@@ -186,10 +192,14 @@ class BeamDesignerApp(tk.Tk):
         right_canvas.pack(side="left", fill="both", expand=True)
         right_scroll = ttk.Scrollbar(right_outer, orient="vertical", command=right_canvas.yview)
         right_scroll.pack(side="right", fill="y")
-        right_canvas.configure(yscrollcommand=right_scroll.set)
+        right_horizontal_scroll = ttk.Scrollbar(right_outer, orient="horizontal", command=right_canvas.xview)
+        right_horizontal_scroll.pack(side="bottom", fill="x")
+        right_canvas.configure(yscrollcommand=right_scroll.set, xscrollcommand=right_horizontal_scroll.set)
         self.results = tk.Frame(right_canvas, bg="#f3f6f7")
-        right_canvas.create_window((0, 0), window=self.results, anchor="nw")
+        right_canvas.create_window((0, 0), window=self.results, anchor="nw", width=720)
         self.results.bind("<Configure>", lambda event: right_canvas.configure(scrollregion=right_canvas.bbox("all")))
+        right_canvas.bind("<MouseWheel>", lambda event: right_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
+        right_canvas.bind("<Shift-MouseWheel>", lambda event: right_canvas.xview_scroll(int(-1 * (event.delta / 120)), "units"))
 
         self.summary_card = self.card("Analysis summary")
         self.summary_subtitle = tk.Label(self.summary_card, text="", bg="#ffffff", fg="#647783", font=("Segoe UI", 9))
