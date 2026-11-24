@@ -1,7 +1,8 @@
 """Tkinter desktop interface for the Beam Designer."""
 
+import json
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
 
 from beam_core import (
     PointLoad,
@@ -58,6 +59,13 @@ class BeamDesignerApp(tk.Tk):
                  font=("Segoe UI", 9, "bold")).pack(side="left")
         tk.Label(top, text="Preliminary screening tool", bg="#ffffff", fg="#647783",
                  font=("Segoe UI", 10)).pack(side="right", padx=24)
+
+        menu = tk.Menu(self)
+        file_menu = tk.Menu(menu, tearoff=False)
+        file_menu.add_command(label="Save", command=self.save_beam)
+        file_menu.add_command(label="Open", command=self.open_beam)
+        menu.add_cascade(label="File", menu=file_menu)
+        self.configure(menu=menu)
 
         heading = tk.Frame(self, bg="#f3f6f7")
         heading.pack(fill="x", padx=36, pady=(24, 12))
@@ -145,6 +153,7 @@ class BeamDesignerApp(tk.Tk):
         self.inertia = self.labeled_entry(props, "Ix", "in4", "204")
         self.section_modulus = self.labeled_entry(props, "Sx", "in3", "33.4")
         self.weight = self.labeled_entry(props, "Self-weight", "lb/ft", "26")
+        self.deflection_limit = self.labeled_entry(section, "Deflection limit", "in", "0.667")
         self.allow_bending = self.labeled_entry(section, "Allowable bending stress", "ksi - optional", "")
         capacities = tk.Frame(section, bg="#ffffff")
         capacities.pack(fill="x")
@@ -289,12 +298,145 @@ class BeamDesignerApp(tk.Tk):
         except (TypeError, ValueError):
             return default
 
+    def set_entry(self, entry, value):
+        entry.delete(0, "end")
+        entry.insert(0, "" if value is None else str(value))
+
+    def save_beam(self):
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Save beam",
+            defaultextension=".json",
+            filetypes=[("Beam JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        point_loads = []
+        for row in self.point_rows:
+            magnitude = row["magnitude"].get().strip()
+            position = row["position"].get().strip()
+            if magnitude or position:
+                point_loads.append({
+                    "magnitude": magnitude,
+                    "position": position,
+                    "kind": row["kind"].get(),
+                })
+
+        beam = {
+            "format": "beam-studio",
+            "version": 1,
+            "support": self.support,
+            "span_ft": self.span.get(),
+            "section": self.beam.get(),
+            "deflection_limit_in": self.deflection_limit.get(),
+            "material": self.material.get(),
+            "property_source": self.property_source.get(),
+            "loads": {
+                "live_uniform_kip_ft": self.live_uniform.get(),
+                "other_uniform_kip_ft": self.other_uniform.get(),
+                "point_loads": point_loads,
+                "include_self_weight": self.self_weight.get(),
+            },
+            "section_properties": {
+                "elastic_modulus_ksi": self.elastic_modulus.get(),
+                "inertia_in4": self.inertia.get(),
+                "section_modulus_in3": self.section_modulus.get(),
+                "self_weight_lb_ft": self.weight.get(),
+                "allowable_bending_ksi": self.allow_bending.get(),
+                "allowable_shear_kip": self.allow_shear.get(),
+                "allowable_bearing_kip": self.allow_bearing.get(),
+            },
+        }
+
+        try:
+            with open(path, "w", encoding="utf-8") as beam_file:
+                json.dump(beam, beam_file, indent=2)
+        except OSError as error:
+            messagebox.showerror("Save failed", str(error), parent=self)
+            return
+        messagebox.showinfo("Beam saved", f"Saved beam to:\n{path}", parent=self)
+
+    def open_beam(self):
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Open beam",
+            filetypes=[("Beam JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as beam_file:
+                beam = json.load(beam_file)
+        except (OSError, json.JSONDecodeError) as error:
+            messagebox.showerror("Open failed", str(error), parent=self)
+            return
+
+        if beam.get("format") != "beam-studio":
+            messagebox.showerror("Open failed", "The selected file is not a Beam Studio beam file.", parent=self)
+            return
+
+        support = beam.get("support")
+        if support not in ("simple", "cantilever"):
+            messagebox.showerror("Open failed", "The beam file has an invalid support type.", parent=self)
+            return
+        self.set_support(support)
+
+        self.set_entry(self.span, beam.get("span_ft", ""))
+        section_name = beam.get("section", "")
+        if section_name in BEAMS:
+            self.beam.set(section_name)
+        else:
+            messagebox.showerror("Open failed", "The beam file has an unknown section.", parent=self)
+            return
+        self.set_entry(self.deflection_limit, beam.get("deflection_limit_in", ""))
+        self.set_entry(self.material, beam.get("material", ""))
+        self.set_entry(self.property_source, beam.get("property_source", ""))
+
+        loads = beam.get("loads", {})
+        self.set_entry(self.live_uniform, loads.get("live_uniform_kip_ft", ""))
+        self.set_entry(self.other_uniform, loads.get("other_uniform_kip_ft", ""))
+        self.self_weight.set(bool(loads.get("include_self_weight", False)))
+
+        properties = beam.get("section_properties", {})
+        property_entries = (
+            (self.elastic_modulus, "elastic_modulus_ksi"),
+            (self.inertia, "inertia_in4"),
+            (self.section_modulus, "section_modulus_in3"),
+            (self.weight, "self_weight_lb_ft"),
+            (self.allow_bending, "allowable_bending_ksi"),
+            (self.allow_shear, "allowable_shear_kip"),
+            (self.allow_bearing, "allowable_bearing_kip"),
+        )
+        for entry, key in property_entries:
+            self.set_entry(entry, properties.get(key, ""))
+
+        for item in list(self.point_rows):
+            item["row"].destroy()
+            self.point_rows.remove(item)
+        for point in loads.get("point_loads", []):
+            self.add_point_load()
+            item = self.point_rows[-1]
+            self.set_entry(item["magnitude"], point.get("magnitude", ""))
+            self.set_entry(item["position"], point.get("position", ""))
+            kind = point.get("kind", "live")
+            item["kind"].set(kind if kind in ("live", "other") else "live")
+        if not self.point_rows:
+            self.add_point_load()
+            self.remove_point_row(self.point_rows[0])
+
+        self.analyze()
+        messagebox.showinfo("Beam opened", f"Opened beam from:\n{path}", parent=self)
+
     def apply_member_preset(self):
         if self.beam.get() == "W12x26":
             values = ("29000", "204", "33.4", "26", "ASTM A992 - assumed for example",
                       "AISC Shapes Database v16.0 - verify benchmark values")
         else:
             values = ("", "", "", "", "", "")
+        if self.beam.get() == "W12x26" and self.deflection_limit.get() == "":
+            self.set_entry(self.deflection_limit, "0.667")
         for entry, value in zip(
             (self.elastic_modulus, self.inertia, self.section_modulus, self.weight,
              self.material, self.property_source),
@@ -333,9 +475,15 @@ class BeamDesignerApp(tk.Tk):
             section_modulus=self.entry_float(self.section_modulus),
             weight=self.entry_float(self.weight),
         )
+        try:
+            deflection_limit = float(self.deflection_limit.get())
+        except ValueError:
+            deflection_limit = 0.0
         errors = []
         if span <= 0 or span > 500:
             errors.append("Enter a span greater than 0 and no more than 500 ft.")
+        if deflection_limit <= 0:
+            errors.append("Enter a positive deflection limit in inches.")
         if live_uniform < 0 or other_uniform < 0:
             errors.append("Uniform loads must be zero or greater.")
         for index, point in enumerate(point_loads, 1):
@@ -384,9 +532,8 @@ class BeamDesignerApp(tk.Tk):
         self.draw_chart("Shear force", [(x, v) for x, _, v in []], "kip")
         self.draw_chart("Shear force", [(x, shear) for x, shear, _ in total_points], "kip")
         self.draw_chart("Bending moment", [(x, moment) for x, _, moment in total_points], "kip-ft")
-        limit = span * 12 / 360
-        self.draw_chart("Deflection", total_deflection, "in", limit)
-        self.draw_checks(span, total_points, total_deflection, live_deflection, properties)
+        self.draw_chart("Deflection", total_deflection, "in", deflection_limit)
+        self.draw_checks(span, deflection_limit, total_points, total_deflection, live_deflection, properties)
 
     def show_error(self, message):
         self.form_error.configure(text=message)
@@ -458,7 +605,7 @@ class BeamDesignerApp(tk.Tk):
             canvas.create_text(right, py - 5, text=f"L/360 - {limit:.3f} {unit}", fill="#9b7028",
                                font=("Segoe UI", 8), anchor="e")
 
-    def draw_checks(self, span, total_points, total_deflection, live_deflection, properties):
+    def draw_checks(self, span, deflection_limit, total_points, total_deflection, live_deflection, properties):
         for widget in self.check_frame.winfo_children():
             widget.destroy()
         max_shear = max(abs(point[1]) for point in total_points)
@@ -466,7 +613,6 @@ class BeamDesignerApp(tk.Tk):
         bending_stress = max_moment * 12 / properties.section_modulus if properties.section_modulus > 0 else 0
         max_deflection = max((abs(value) for _, value in total_deflection), default=0)
         max_live_deflection = max((abs(value) for _, value in live_deflection), default=0)
-        limit = span * 12 / 360
         checks = []
         try:
             bending_limit = float(self.allow_bending.get())
@@ -481,8 +627,8 @@ class BeamDesignerApp(tk.Tk):
         except ValueError:
             bearing_limit = 0
         checks.append(("Bending stress", bending_stress, bending_limit, "ksi", "fb = M/Sx"))
-        checks.append(("Total-load deflection", max_deflection, limit, "in", "L/360"))
-        checks.append(("Live-load deflection", max_live_deflection, limit, "in", "L/360"))
+        checks.append(("Total-load deflection", max_deflection, deflection_limit, "in", "Entered limit"))
+        checks.append(("Live-load deflection", max_live_deflection, deflection_limit, "in", "Entered limit"))
         checks.append(("Shear strength", max_shear, shear_limit, "kip", "Entered capacity"))
         max_bearing = abs(solve_statics(span, make_load_case(
             self.entry_float(self.live_uniform),

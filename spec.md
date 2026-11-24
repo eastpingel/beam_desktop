@@ -19,6 +19,9 @@ Show shear, moment, and deflection diagrams for a beam and provide preliminary s
 - Use labels and validation feedback to identify units and invalid or missing inputs.
 - Keep the sample W12x26 beam and loading visible and usable as the initial example.
 - Display selected member properties and calculation assumptions alongside the results.
+- Provide a File menu with Save and Open commands.
+- Save beam files in JSON format containing the support type, span, selected section and section properties, deflection limit, uniform loads, point loads, material/product, property source, and self-weight setting.
+- Open restores the saved beam model and immediately reruns the analysis.
 
 ## First-version beam list
 
