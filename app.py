@@ -89,9 +89,9 @@ class BeamDesignerApp(tk.Tk):
         controls.bind("<Configure>", lambda event: left_scroll.configure(scrollregion=left_scroll.bbox("all")))
 
         tk.Label(controls, text="Analysis inputs", bg="#ffffff", fg="#172a35",
-                 font=("Segoe UI", 13, "bold"), padx=16, pady=(14, 2)).pack(fill="x")
+                 font=("Segoe UI", 13, "bold"), padx=16, pady=14).pack(fill="x")
         tk.Label(controls, text="All loads are downward service loads.", bg="#ffffff", fg="#647783",
-                 font=("Segoe UI", 9), padx=16, pady=(0, 12)).pack(fill="x")
+                 font=("Segoe UI", 9), padx=16, pady=12).pack(fill="x")
 
         section = self.control_section(controls, "Beam model")
         tk.Label(section, text="Support condition", bg="#ffffff", fg="#445964",
